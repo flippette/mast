@@ -1,0 +1,10 @@
+[package]
+name = "mast"
+version = "0.1.0"
+edition = "2021"
+authors = ["flippette <quangdatle2006@outlook.com>"]
+license = "Unlicense"
+
+[dependencies]
+libm = "0.2"
+nom = { version = "7.1", features = ["alloc"], default-features = false }
