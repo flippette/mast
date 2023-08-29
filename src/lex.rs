@@ -149,7 +149,7 @@ mod util {
             opt(take_while(|c: char| c.is_ascii_digit()))(src)?;
 
         let fract_len: u32;
-        let err = |src| Err::Error(make_error(src, ErrorKind::Tag));
+        let err = |src| move |_| Err::Error(make_error(src, ErrorKind::Tag));
 
         #[allow(clippy::cast_possible_truncation)]
         let (src, int_part, fract_part) = if let Some(s) = int_part {
@@ -166,8 +166,8 @@ mod util {
 
             (
                 src,
-                s.parse().map_err(|_| err(src))?,
-                fract_part.parse::<u32>().map_err(|_| err(src))?,
+                s.parse().map_err(err(src))?,
+                fract_part.parse::<u32>().map_err(err(src))?,
             )
         } else {
             let (src, fract_part) = map(
@@ -178,7 +178,7 @@ mod util {
             // we are absolutely not having 2^64 character-long string slices
             fract_len = fract_part.len() as u32;
 
-            (src, 0, fract_part.parse().map_err(|_| err(src))?)
+            (src, 0, fract_part.parse().map_err(err(src))?)
         };
 
         Ok((
