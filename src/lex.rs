@@ -132,21 +132,11 @@ mod util {
         use nom::{
             branch::alt,
             bytes::complete::{tag, take_while},
-            combinator::{map, map_res, opt},
+            combinator::{map, opt},
             error::{make_error, ErrorKind},
             sequence::tuple,
             Err,
         };
-
-        fn digits(n: u32) -> u32 {
-            let mut cnt = 0;
-            let mut n = n;
-            while n != 0 {
-                n /= 10;
-                cnt += 1;
-            }
-            cnt
-        }
 
         let (src, sign) = map(opt(alt((tag("+"), tag("-")))), |op| match op {
             Some("+") => Some(1.0),
@@ -158,36 +148,43 @@ mod util {
         let (src, int_part) =
             opt(take_while(|c: char| c.is_ascii_digit()))(src)?;
 
+        let fract_len: u32;
+        let err = |src| Err::Error(make_error(src, ErrorKind::Tag));
+
+        #[allow(clippy::cast_possible_truncation)]
         let (src, int_part, fract_part) = if let Some(s) = int_part {
-            let (src, fract_part) = map_res(
+            let (src, fract_part) = map(
                 opt(tuple((
                     tag("."),
                     take_while(|c: char| c.is_ascii_digit()),
                 ))),
-                |op| op.unwrap_or((".", "0")).1.parse::<u32>(),
+                |op| op.unwrap_or((".", "0")).1,
             )(src)?;
+
+            // we are absolutely not having 2^64 character-long string slices
+            fract_len = fract_part.len() as u32;
 
             (
                 src,
-                s.parse::<u32>().map_err(|_| {
-                    Err::Error(make_error(src, ErrorKind::Float))
-                })?,
-                fract_part,
+                s.parse().map_err(|_| err(src))?,
+                fract_part.parse::<u32>().map_err(|_| err(src))?,
             )
         } else {
-            let (src, fract_part) = map_res(
+            let (src, fract_part) = map(
                 tuple((tag("."), take_while(|c: char| c.is_ascii_digit()))),
-                |op: (&str, &str)| op.1.parse::<u32>(),
+                |op: (&str, &str)| op.1,
             )(src)?;
 
-            (src, 0, fract_part)
+            // we are absolutely not having 2^64 character-long string slices
+            fract_len = fract_part.len() as u32;
+
+            (src, 0, fract_part.parse().map_err(|_| err(src))?)
         };
 
         Ok((
             src,
             f64::from(int_part) * sign
-                + f64::from(fract_part)
-                    / libm::pow(10.0, f64::from(digits(fract_part))),
+                + f64::from(fract_part) / libm::pow(10.0, f64::from(fract_len)),
         ))
     }
 }
