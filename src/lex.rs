@@ -11,6 +11,7 @@ pub enum Token<'src> {
     Sub,
     Mul,
     Div,
+    Pow,
 
     LParen,
     RParen,
@@ -52,6 +53,7 @@ impl<'src> Token<'src> {
                 map(tag("-"), |_| Token::Sub),
                 map(tag("*"), |_| Token::Mul),
                 map(tag("/"), |_| Token::Div),
+                map(tag("^"), |_| Token::Pow),
             ))(src)
         }
 
@@ -195,7 +197,7 @@ mod test {
 
     #[test]
     fn lexing() {
-        let input = "(1 + 1) - 2 / 3 + 4+2i / π - 5e + 6π";
+        let input = "(1 + 1) - 2 / 3 + 4+2i / π - 5e + 6π^2";
         let mut lexer = Lexer::new(input);
 
         assert_eq!(lexer.next(), Some(Token::LParen));
@@ -220,6 +222,8 @@ mod test {
         assert_eq!(lexer.next(), Some(Token::Add));
         assert_eq!(lexer.next(), Some(Token::Literal(Literal::Real(6.0))));
         assert_eq!(lexer.next(), Some(Token::Literal(Literal::Constant('π'))));
+        assert_eq!(lexer.next(), Some(Token::Pow));
+        assert_eq!(lexer.next(), Some(Token::Literal(Literal::Real(2.0))));
         assert_eq!(lexer.next(), None);
     }
 }
