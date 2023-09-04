@@ -130,6 +130,7 @@ impl<'src> Iterator for Lexer<'src> {
 
 mod util {
     use super::Result;
+    use core::num::IntErrorKind;
 
     pub fn real(src: &str) -> Result<f64> {
         use nom::{
@@ -149,8 +150,9 @@ mod util {
         let sign =
             sign.ok_or_else(|| Err::Error(make_error(src, ErrorKind::Tag)))?;
 
-        let (src, int_part) =
+        let (src_int_part, int_part) =
             opt(take_while1(|c: char| c.is_ascii_digit()))(src)?;
+        let src = src_int_part;
 
         let err = |src| move |_| Err::Error(make_error(src, ErrorKind::Tag));
         let mut fract_part_parser =
@@ -165,7 +167,19 @@ mod util {
 
             (
                 src,
-                int_part.and_then(|s| s.parse().ok()).unwrap_or(0),
+                match int_part {
+                    Some(s) => match s.parse::<u32>() {
+                        Ok(i) => i,
+                        Err(e) if *e.kind() == IntErrorKind::PosOverflow => {
+                            Err(Err::Error(make_error(
+                                src_int_part,
+                                ErrorKind::Float,
+                            )))?
+                        }
+                        _ => 0,
+                    },
+                    _ => 0,
+                },
                 fract_part.parse::<u32>().map_err(err(src))?,
                 u32::try_from(fract_part.len()).expect("fract part too big!"),
             )
