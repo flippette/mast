@@ -154,7 +154,6 @@ mod util {
             opt(take_while1(|c: char| c.is_ascii_digit()))(src)?;
         let src = src_int_part;
 
-        let err = |src| move |_| Err::Error(make_error(src, ErrorKind::Tag));
         let mut fract_part_parser =
             preceded(tag("."), take_while(|c: char| c.is_ascii_digit()));
 
@@ -180,7 +179,9 @@ mod util {
                     },
                     _ => 0,
                 },
-                fract_part.parse::<u32>().map_err(err(src))?,
+                fract_part
+                    .parse::<u32>()
+                    .map_err(|_| Err::Error(make_error(src, ErrorKind::Tag)))?,
                 u32::try_from(fract_part.len()).expect("fract part too big!"),
             )
         };
