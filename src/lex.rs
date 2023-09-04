@@ -150,37 +150,27 @@ mod util {
         let (src, int_part) =
             opt(take_while(|c: char| c.is_ascii_digit()))(src)?;
 
-        let fract_len: u32;
         let err = |src| move |_| Err::Error(make_error(src, ErrorKind::Tag));
+        let fract_part_parser =
+            tuple((tag("."), take_while(|c: char| c.is_ascii_digit())));
 
-        #[allow(clippy::cast_possible_truncation)]
-        let (src, int_part, fract_part) = if let Some(s) = int_part {
-            let (src, fract_part) = map(
-                opt(tuple((
-                    tag("."),
-                    take_while(|c: char| c.is_ascii_digit()),
-                ))),
-                |op| op.unwrap_or((".", "0")).1,
-            )(src)?;
-
-            // we are absolutely not having 2^64 character-long string slices
-            fract_len = fract_part.len() as u32;
+        let (src, int_part, fract_part, fract_len) = {
+            let (src, fract_part) = if int_part.is_some() {
+                map(opt(fract_part_parser), |op| op.unwrap_or((".", "0")).1)(
+                    src,
+                )?
+            } else {
+                map(fract_part_parser, |op| op.1)(src)?
+            };
 
             (
                 src,
-                s.parse().map_err(err(src))?,
+                int_part
+                    .and_then(|s| s.parse().map_err(err(src)).ok())
+                    .unwrap_or(0),
                 fract_part.parse::<u32>().map_err(err(src))?,
+                u32::try_from(fract_part.len()).expect("fract part too big!"),
             )
-        } else {
-            let (src, fract_part) = map(
-                tuple((tag("."), take_while(|c: char| c.is_ascii_digit()))),
-                |op: (&str, &str)| op.1,
-            )(src)?;
-
-            // we are absolutely not having 2^64 character-long string slices
-            fract_len = fract_part.len() as u32;
-
-            (src, 0, fract_part.parse().map_err(err(src))?)
         };
 
         Ok((
