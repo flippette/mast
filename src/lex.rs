@@ -7,6 +7,8 @@ pub type Result<'src, O> = nom::IResult<&'src str, O>;
 ///
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token<'src> {
+    Literal(Literal),
+
     Add,
     Sub,
     Mul,
@@ -16,7 +18,6 @@ pub enum Token<'src> {
     LParen,
     RParen,
 
-    Literal(Literal),
     Ident(&'src str),
 
     Unknown(&'src str),
@@ -65,9 +66,9 @@ impl<'src> Token<'src> {
         }
 
         alt((
+            map(Literal::parse, Token::Literal),
             sign,
             paren,
-            map(Literal::parse, Token::Literal),
             map(take_while1(|c: char| c.is_ascii_alphabetic()), Token::Ident),
             |i| Ok(("", Token::Unknown(i))), // unknown consumes the entire island
         ))(src)
@@ -133,41 +134,38 @@ mod util {
     pub fn real(src: &str) -> Result<f64> {
         use nom::{
             branch::alt,
-            bytes::complete::{tag, take_while},
+            bytes::complete::{tag, take_while, take_while1},
             combinator::{map, opt},
             error::{make_error, ErrorKind},
-            sequence::tuple,
+            sequence::preceded,
             Err,
         };
 
         let (src, sign) = map(opt(alt((tag("+"), tag("-")))), |op| match op {
-            Some("+") => Some(1.0),
+            Some("+") | None => Some(1.0),
             Some("-") => Some(-1.0),
-            _ => None,
+            Some(_) => None,
         })(src)?;
-        let sign = sign.unwrap_or(1.0);
+        let sign =
+            sign.ok_or_else(|| Err::Error(make_error(src, ErrorKind::Tag)))?;
 
         let (src, int_part) =
-            opt(take_while(|c: char| c.is_ascii_digit()))(src)?;
+            opt(take_while1(|c: char| c.is_ascii_digit()))(src)?;
 
         let err = |src| move |_| Err::Error(make_error(src, ErrorKind::Tag));
-        let fract_part_parser =
-            tuple((tag("."), take_while(|c: char| c.is_ascii_digit())));
+        let mut fract_part_parser =
+            preceded(tag("."), take_while(|c: char| c.is_ascii_digit()));
 
         let (src, int_part, fract_part, fract_len) = {
             let (src, fract_part) = if int_part.is_some() {
-                map(opt(fract_part_parser), |op| op.unwrap_or((".", "0")).1)(
-                    src,
-                )?
+                map(opt(fract_part_parser), |op| op.unwrap_or("0"))(src)?
             } else {
-                map(fract_part_parser, |op| op.1)(src)?
+                fract_part_parser(src)?
             };
 
             (
                 src,
-                int_part
-                    .and_then(|s| s.parse().map_err(err(src)).ok())
-                    .unwrap_or(0),
+                int_part.and_then(|s| s.parse().ok()).unwrap_or(0),
                 fract_part.parse::<u32>().map_err(err(src))?,
                 u32::try_from(fract_part.len()).expect("fract part too big!"),
             )
@@ -175,8 +173,12 @@ mod util {
 
         Ok((
             src,
-            f64::from(int_part) * sign
-                + f64::from(fract_part) / libm::pow(10.0, f64::from(fract_len)),
+            libm::copysign(
+                f64::from(int_part)
+                    + f64::from(fract_part)
+                        / libm::pow(10.0, f64::from(fract_len)),
+                sign,
+            ),
         ))
     }
 }
@@ -187,33 +189,25 @@ mod test {
 
     #[test]
     fn lexing() {
-        let input = "(1 + 1) - 2 / 3 + 4+2i / π - 5e + 6π^2";
+        let input = "(e + 2i) * 3x^-4.5π - 5 / 6.7";
         let mut lexer = Lexer::new(input);
 
         assert_eq!(lexer.next(), Some(Token::LParen));
-        assert_eq!(lexer.next(), Some(Token::Literal(Literal::Real(1.0))));
-        assert_eq!(lexer.next(), Some(Token::Add));
-        assert_eq!(lexer.next(), Some(Token::Literal(Literal::Real(1.0))));
-        assert_eq!(lexer.next(), Some(Token::RParen));
-        assert_eq!(lexer.next(), Some(Token::Sub));
-        assert_eq!(lexer.next(), Some(Token::Literal(Literal::Real(2.0))));
-        assert_eq!(lexer.next(), Some(Token::Div));
-        assert_eq!(lexer.next(), Some(Token::Literal(Literal::Real(3.0))));
-        assert_eq!(lexer.next(), Some(Token::Add));
-        assert_eq!(lexer.next(), Some(Token::Literal(Literal::Real(4.0))));
+        assert_eq!(lexer.next(), Some(Token::Literal(Literal::Constant('e'))));
         assert_eq!(lexer.next(), Some(Token::Add));
         assert_eq!(lexer.next(), Some(Token::Literal(Literal::Real(2.0))));
         assert_eq!(lexer.next(), Some(Token::Literal(Literal::Constant('i'))));
-        assert_eq!(lexer.next(), Some(Token::Div));
+        assert_eq!(lexer.next(), Some(Token::RParen));
+        assert_eq!(lexer.next(), Some(Token::Mul));
+        assert_eq!(lexer.next(), Some(Token::Literal(Literal::Real(3.0))));
+        assert_eq!(lexer.next(), Some(Token::Ident("x")));
+        assert_eq!(lexer.next(), Some(Token::Pow));
+        assert_eq!(lexer.next(), Some(Token::Literal(Literal::Real(-4.5))));
         assert_eq!(lexer.next(), Some(Token::Literal(Literal::Constant('π'))));
         assert_eq!(lexer.next(), Some(Token::Sub));
         assert_eq!(lexer.next(), Some(Token::Literal(Literal::Real(5.0))));
-        assert_eq!(lexer.next(), Some(Token::Literal(Literal::Constant('e'))));
-        assert_eq!(lexer.next(), Some(Token::Add));
-        assert_eq!(lexer.next(), Some(Token::Literal(Literal::Real(6.0))));
-        assert_eq!(lexer.next(), Some(Token::Literal(Literal::Constant('π'))));
-        assert_eq!(lexer.next(), Some(Token::Pow));
-        assert_eq!(lexer.next(), Some(Token::Literal(Literal::Real(2.0))));
+        assert_eq!(lexer.next(), Some(Token::Div));
+        assert_eq!(lexer.next(), Some(Token::Literal(Literal::Real(6.7))));
         assert_eq!(lexer.next(), None);
     }
 }
