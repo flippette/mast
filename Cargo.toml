@@ -10,6 +10,8 @@ name = "mast-repl"
 path = "src/repl.rs"
 
 [dependencies]
+derive_more = { version = "1.0.0-beta.3", default-features = false, features = ["add", "add_assign", "display", "from", "mul", "mul_assign"] }
 libm = "0.2"
 nom = { version = "7.1", features = ["alloc"], default-features = false }
+num-complex = { version = "0.4", default-features = false, features = ["libm"] }
 owo-colors = "3.5"

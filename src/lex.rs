@@ -1,6 +1,4 @@
-use nom::bytes::complete::take_till1;
-
-use crate::value::{Complex, Number};
+use crate::value::Number;
 
 pub type Result<'src, O> = nom::IResult<&'src str, O>;
 
@@ -47,7 +45,7 @@ impl<'src> Token<'src> {
     pub fn parse(src: &'src str) -> Result<Self> {
         use nom::{
             branch::alt,
-            bytes::complete::{tag, take_while1},
+            bytes::complete::{tag, take_till1, take_while1},
             combinator::map,
         };
 
@@ -88,9 +86,9 @@ impl Literal {
     /// Supported constants are always 1 character long.
     ///
     pub const CONSTANTS: &'static [(char, Number)] = &[
-        ('π', Number::Real(core::f64::consts::PI)),
-        ('e', Number::Real(core::f64::consts::E)),
-        ('i', Number::Complex(Complex::new(0.0, 1.0))),
+        ('π', Number::real(core::f64::consts::PI)),
+        ('e', Number::real(core::f64::consts::E)),
+        ('i', Number::complex(0.0, 1.0)),
     ];
 
     ///
