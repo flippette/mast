@@ -1,3 +1,5 @@
+use nom::bytes::complete::take_till1;
+
 use crate::value::{Complex, Number};
 
 pub type Result<'src, O> = nom::IResult<&'src str, O>;
@@ -41,6 +43,7 @@ impl<'src> Token<'src> {
     ///
     /// Parse a [`Token`] from an input slice, assuming no preceding whitespace.
     ///
+    #[allow(clippy::missing_errors_doc)]
     pub fn parse(src: &'src str) -> Result<Self> {
         use nom::{
             branch::alt,
@@ -70,7 +73,10 @@ impl<'src> Token<'src> {
             sign,
             paren,
             map(take_while1(|c: char| c.is_ascii_alphabetic()), Token::Ident),
-            |i| Ok(("", Token::Unknown(i))), // unknown consumes the entire island
+            map(
+                take_till1(|c: char| c.is_ascii_whitespace()),
+                Token::Unknown,
+            ),
         ))(src)
     }
 }
@@ -87,6 +93,10 @@ impl Literal {
         ('i', Number::Complex(Complex::new(0.0, 1.0))),
     ];
 
+    ///
+    /// Parse a [`Literal`] from an input slice, assuming no preceding whitespace.
+    ///
+    #[allow(clippy::missing_errors_doc)]
     pub fn parse(src: &str) -> Result<Self> {
         use nom::{bytes::complete::take, combinator::map};
 
@@ -132,6 +142,12 @@ mod util {
     use super::Result;
     use core::num::IntErrorKind;
 
+    ///
+    /// Parse a real number from an input slice, assuming no preceding whitespace.
+    ///
+    /// Note that both the integer and fractional parts of the number
+    /// must fit inside a [`u32`] value.
+    ///
     pub fn real(src: &str) -> Result<f64> {
         use nom::{
             branch::alt,
@@ -145,7 +161,7 @@ mod util {
         let (src, sign) = map(opt(alt((tag("+"), tag("-")))), |op| match op {
             Some("+") | None => Some(1.0),
             Some("-") => Some(-1.0),
-            Some(_) => None,
+            _ => None,
         })(src)?;
         let sign =
             sign.ok_or_else(|| Err::Error(make_error(src, ErrorKind::Tag)))?;
@@ -202,27 +218,74 @@ mod util {
 mod test {
     use super::{Lexer, Literal, Token};
 
-    #[test]
-    fn lexing() {
-        let input = "(e + 2i) * 3x^-4.5π - 5 / 6.7";
-        let mut lexer = Lexer::new(input);
+    ///
+    /// Declares a test case with a name, given input and expected output.
+    ///
+    macro_rules! test_case {
+        ($name:ident, $input:expr, $expected:expr $(,)?) => {
+            #[test]
+            fn $name() {
+                // this is _way_ faster than just passing $expected for some reason
+                let expected = $expected;
 
-        assert_eq!(lexer.next(), Some(Token::LParen));
-        assert_eq!(lexer.next(), Some(Token::Literal(Literal::Constant('e'))));
-        assert_eq!(lexer.next(), Some(Token::Add));
-        assert_eq!(lexer.next(), Some(Token::Literal(Literal::Real(2.0))));
-        assert_eq!(lexer.next(), Some(Token::Literal(Literal::Constant('i'))));
-        assert_eq!(lexer.next(), Some(Token::RParen));
-        assert_eq!(lexer.next(), Some(Token::Mul));
-        assert_eq!(lexer.next(), Some(Token::Literal(Literal::Real(3.0))));
-        assert_eq!(lexer.next(), Some(Token::Ident("x")));
-        assert_eq!(lexer.next(), Some(Token::Pow));
-        assert_eq!(lexer.next(), Some(Token::Literal(Literal::Real(-4.5))));
-        assert_eq!(lexer.next(), Some(Token::Literal(Literal::Constant('π'))));
-        assert_eq!(lexer.next(), Some(Token::Sub));
-        assert_eq!(lexer.next(), Some(Token::Literal(Literal::Real(5.0))));
-        assert_eq!(lexer.next(), Some(Token::Div));
-        assert_eq!(lexer.next(), Some(Token::Literal(Literal::Real(6.7))));
-        assert_eq!(lexer.next(), None);
+                let mut tokens = 0;
+                for (i, token) in Lexer::new($input).enumerate() {
+                    assert_eq!(token, expected[i]);
+                    tokens += 1;
+                }
+
+                assert_eq!(tokens, expected.len());
+            }
+        };
     }
+
+    ///
+    /// Concatenates literals, separated by a space.
+    ///
+    macro_rules! space_separated {
+        ($($term:literal $(,)?)+) => {
+            concat!($($term, ' ',)+)
+        }
+    }
+
+    test_case!(
+        general,
+        "(e + 2i) * 3x^-4.5π - 5 / 6.7",
+        [
+            Token::LParen,
+            Token::Literal(Literal::Constant('e')),
+            Token::Add,
+            Token::Literal(Literal::Real(2.0)),
+            Token::Literal(Literal::Constant('i')),
+            Token::RParen,
+            Token::Mul,
+            Token::Literal(Literal::Real(3.0)),
+            Token::Ident("x"),
+            Token::Pow,
+            Token::Literal(Literal::Real(-4.5)),
+            Token::Literal(Literal::Constant('π')),
+            Token::Sub,
+            Token::Literal(Literal::Real(5.0)),
+            Token::Div,
+            Token::Literal(Literal::Real(6.7)),
+        ],
+    );
+
+    test_case!(
+        large_real,
+        space_separated!(
+            4294967295.4294967295,
+            4294967296.4294967296,
+            -4294967295.4294967295,
+            -4294967296.4294967296,
+        ),
+        [
+            Token::Literal(Literal::Real(4294967295.4294967295)),
+            Token::Unknown("4294967296.4294967296"),
+            Token::Literal(Literal::Real(-4294967295.4294967295)),
+            // this is expected behavior, "4294967296" does not fit in a [`u32`].
+            Token::Sub,
+            Token::Unknown("4294967296.4294967296"),
+        ],
+    );
 }
